@@ -61,19 +61,6 @@ FONT_PATH        = os.path.join(ROOT, "Bebas_Neue", "BebasNeue-Regular.ttf")
 FONT_SIZE        = 110
 WORDS_GROUP      = 2
 
-# ── Scheduler 24/7 ──
-# Heures UTC de publication (pic d'audience anglophone)
-#   11h UTC = 7h EST / 12h BST / 21h AEST
-#   17h UTC = 13h EST / 18h BST
-#   23h UTC = 19h EST / 9h AEST
-PUBLISH_HOURS_UTC = [11, 17, 23]
-
-# Durée max d'un run GitHub Actions (6h limite → on s'arrête à 5h50)
-MAX_RUN_SECONDS = 5 * 3600 + 50 * 60
-
-# Vérification toutes les 2h (réduit les appels API au minimum)
-SCHEDULER_TICK = 2 * 3600
-
 _whisper_model = None
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -519,22 +506,13 @@ def process_row(row, existing_captions):
     return True
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  🚀  MAIN — SCHEDULER 24/7
+#  🚀  MAIN — ONE SHOT (déclenché par le cron YML)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def get_last_passed_slot(now_utc):
-    """Retourne le dernier créneau de publication déjà dépassé aujourd'hui ou hier."""
-    passed = [h for h in PUBLISH_HOURS_UTC if h <= now_utc.hour]
-    if passed:
-        return f"{now_utc.date()}_{max(passed):02d}"
-    # Aucun créneau dépassé aujourd'hui → prendre le dernier d'hier
-    yesterday = (now_utc - timedelta(days=1)).date()
-    return f"{yesterday}_{max(PUBLISH_HOURS_UTC):02d}"
 
 def main():
     print("\n" + "="*58)
     print("      C H R O N O G R A P H I X   ( G I T H U B )")
-    print("      Scheduler 24/7 actif - verification toutes les 2h")
+    print("      Mode one-shot — publie et quitte")
     print("="*58)
 
     check_environment()
@@ -546,94 +524,29 @@ def main():
     df = load_csv(CSV_FILE)
     rows = [row.to_dict() for _, row in df.iterrows()]
 
-    next_index   = 0
-    posted_slots = set()   # "YYYY-MM-DD_HH" déjà publiés dans ce run
-    is_first     = True
-    success      = 0
-    run_start    = time.time()
-
     print(f"\n  {len(rows)} videos chargees depuis le CSV.")
-    print(f"  Creneaux de publication (UTC) : {PUBLISH_HOURS_UTC}")
-    print(f"  Verification toutes les 2h — publication si creneau manque\n")
 
-    while True:
-
-        # ── Vérification durée max GitHub Actions ──────────────────
-        elapsed = time.time() - run_start
-        if elapsed >= MAX_RUN_SECONDS:
-            print(f"\n  Duree max atteinte — arret propre. Prochain run dans moins de 6h.")
+    # Parcourir les lignes jusqu'à trouver une vidéo non publiée
+    for i, row in enumerate(rows):
+        try:
+            ok = process_row(row, existing_captions=existing_captions)
+            if ok == "duplicate":
+                print(f"  Doublon — passage a la video suivante.")
+                continue
+            elif ok:
+                print(f"\n  Publication reussie. Fin du script.")
+                break
+            else:
+                print(f"  Echec de la publication. Fin du script.")
+                break
+        except Exception as e:
+            print(f"\n  Erreur inattendue ligne {i} : {e}")
             break
 
-        # ── Plus aucune vidéo disponible ───────────────────────────
-        if next_index >= len(rows):
-            print("\n  Toutes les videos du CSV ont ete publiees.")
-            break
-
-        now_utc = datetime.now(timezone.utc)
-
-        # ── Trouver le dernier créneau dépassé non encore publié ───
-        slot_to_publish = get_last_passed_slot(now_utc)
-
-        if slot_to_publish not in posted_slots:
-            posted_slots.add(slot_to_publish)
-            slot_hour = int(slot_to_publish.split("_")[1])
-
-            # ── Délai aléatoire (sauf première vidéo) ──────────────
-            if is_first:
-                print(f"\n{'='*58}")
-                print(f"  1ere video — publication immediate (pas de delai).")
-                print(f"{'='*58}")
-            else:
-                delay = random.randint(0, 1200)
-                m, s  = delay // 60, delay % 60
-                print(f"\n{'='*58}")
-                print(f"  Creneau {slot_hour}h UTC depasse — delai aleatoire : {m}m {s}s")
-                print(f"  Publication prevue a {(now_utc + timedelta(seconds=delay)).strftime('%H:%M:%S')} UTC")
-                print(f"{'='*58}")
-                time.sleep(delay)
-
-            # ── Publication ─────────────────────────────────────────
-            try:
-                ok = process_row(rows[next_index], existing_captions=existing_captions)
-                if ok == "duplicate":
-                    print(f"  Doublon — passage a la video suivante.")
-                    next_index += 1
-                    posted_slots.discard(slot_to_publish)
-                elif ok:
-                    success  += 1
-                    is_first  = False
-                    next_index += 1
-                    print(f"  Publication reussie ({success} au total ce run).")
-                else:
-                    print(f"  Echec — nouvelle tentative au prochain creneau.")
-                    posted_slots.discard(slot_to_publish)
-            except Exception as e:
-                print(f"\n  Erreur inattendue : {e}")
-                posted_slots.discard(slot_to_publish)
-
-        else:
-            # ── Prochain créneau à venir ────────────────────────────
-            future_slots = sorted([h for h in PUBLISH_HOURS_UTC if h > now_utc.hour])
-            if future_slots:
-                next_h = future_slots[0]
-                wait_seconds = (next_h - now_utc.hour) * 3600 - now_utc.minute * 60 - now_utc.second
-            else:
-                # Tous les créneaux du jour passés → attendre 11h demain
-                next_h = PUBLISH_HOURS_UTC[0]
-                wait_seconds = (24 - now_utc.hour + next_h) * 3600 - now_utc.minute * 60 - now_utc.second
-
-            # Ne pas dépasser la durée max du run
-            remaining = MAX_RUN_SECONDS - elapsed
-            sleep_time = min(wait_seconds, remaining, SCHEDULER_TICK)
-
-            print(f"  [{now_utc.strftime('%H:%M')} UTC]  Prochain creneau : {next_h}h UTC — "
-                  f"attente de {int(sleep_time // 60)}m")
-            time.sleep(max(sleep_time, 60))
-
-    # ── Nettoyage ──────────────────────────────────────────────────
+    # Nettoyage
     shutil.rmtree(TEMP_DIR, ignore_errors=True)
     shutil.rmtree(OUTPUT_IMAGES, ignore_errors=True)
-    print(f"\n{'='*58}\n  RUN TERMINE — {success} video(s) publiee(s).\n{'='*58}\n")
+    print(f"\n{'='*58}\n  RUN TERMINE\n{'='*58}\n")
 
 if __name__ == "__main__":
     main()
