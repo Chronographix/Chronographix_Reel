@@ -1,0 +1,3 @@
+
+piper/voices/*.onnx
+piper/voices/*.onnx.json
