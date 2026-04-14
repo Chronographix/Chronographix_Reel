@@ -2,18 +2,6 @@ name: Chronographix Auto-Post
 
 on:
   schedule:
-    # ─────────────────────────────────────────────────────────────
-    # Declenchement aux heures de forte affluence Instagram
-    # Le script se lance, publie 1 video, et s'arrete.
-    # Consommation : ~20 min de quota par publication
-    # au lieu de 6h en mode scheduler continu.
-    #
-    #    UTC    | EST (New York) | BST (Londres) | AEST (Sydney)
-    #    -------+----------------+---------------+--------------
-    #    11:00  |  7h00 AM       |  12h00 PM     |  21h00 PM
-    #    17:00  |  13h00 PM      |  18h00 PM     |  03h00 AM
-    #    23:00  |  19h00 PM      |  00h00 AM     |  09h00 AM
-    # ─────────────────────────────────────────────────────────────
     - cron: '0 11 * * *'
     - cron: '0 17 * * *'
     - cron: '0 23 * * *'
@@ -33,7 +21,20 @@ jobs:
         Remove-Item -Recurse -Force piper -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Path piper | Out-Null
         $piperUrl = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip"
-        Invoke-WebRequest -Uri $piperUrl -OutFile piper_release.zip
+        $maxRetries = 3
+        $attempt = 0
+        do {
+          $attempt++
+          Write-Host "Tentative $attempt/$maxRetries..."
+          try {
+            Invoke-WebRequest -Uri $piperUrl -OutFile piper_release.zip -TimeoutSec 120
+            break
+          } catch {
+            Write-Host "Echec : $_"
+            if ($attempt -ge $maxRetries) { exit 1 }
+            Start-Sleep -Seconds 30
+          }
+        } while ($true)
         Expand-Archive -Path piper_release.zip -DestinationPath piper_extracted -Force
         Copy-Item -Path "piper_extracted\piper\*" -Destination "piper\" -Recurse -Force
         Remove-Item piper_release.zip, piper_extracted -Recurse -Force
