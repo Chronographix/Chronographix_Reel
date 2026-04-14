@@ -69,16 +69,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests pandas numpy Pillow moviepy==1.0.3 tqdm openai-whisper
 
-    - name: Delai aleatoire anti-bot (0 a 20 minutes)
-      if: github.event_name == 'schedule'
-      run: |
-        $delay = Get-Random -Minimum 0 -Maximum 1200
-        $minutes = [math]::Floor($delay / 60)
-        $seconds = $delay % 60
-        Write-Host "Delai tire au sort : ${minutes}m ${seconds}s"
-        Start-Sleep -Seconds $delay
-      shell: pwsh
-
     - name: Publier une video
       env:
         IG_TOKEN: ${{ secrets.IG_TOKEN }}
