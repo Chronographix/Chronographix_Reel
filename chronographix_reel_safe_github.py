@@ -494,13 +494,27 @@ def process_row(row, existing_captions):
     if not final_video_url:
         shutil.rmtree(row_temp, ignore_errors=True)
         return False
-    
+
     ig_id = upload_to_instagram_reels(final_video_url, instagram_caption)
-    
-    if ig_id:
-        ensure_dir(OUTPUT_UPLOADED)
-        try: shutil.move(video_path, os.path.join(OUTPUT_UPLOADED, os.path.basename(video_path)))
-        except: pass
+
+    # ── Retry avec un nouveau lien cloud si Instagram rejette ──────
+    if not ig_id:
+        print("  🔄  Nouvelle tentative avec un lien cloud différent...")
+        time.sleep(15)
+        final_video_url = upload_video_to_cloud(video_path)
+        if final_video_url:
+            ig_id = upload_to_instagram_reels(final_video_url, instagram_caption)
+        else:
+            print("  ❌  Impossible d'obtenir un nouveau lien cloud.")
+
+    if not ig_id:
+        print("  ❌  Instagram a rejeté la vidéo après 2 tentatives.")
+        shutil.rmtree(row_temp, ignore_errors=True)
+        return False
+
+    ensure_dir(OUTPUT_UPLOADED)
+    try: shutil.move(video_path, os.path.join(OUTPUT_UPLOADED, os.path.basename(video_path)))
+    except: pass
 
     shutil.rmtree(row_temp, ignore_errors=True)
     return True
